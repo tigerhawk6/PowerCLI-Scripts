@@ -97,8 +97,6 @@ Function Add-ContentLibraryItem {
     $ItemUpdateSessionEndpointType.source_endpoint.uri = $ItemURL
     $ItemUpdateSessionEndpointType.source_endpoint.ssl_certificate_thumbprint = $CLitemWebSiteCertThumbprint
     $ItemUpdateSessionEndpointType.source_type = "PULL"
-    #$ItemUpdateSessionEndpointType.checksum_info.checksum = $itemChecksum
-    $ItemUpdateSessionEndpointType.size = $itemSize
     $ItemUpdateEndpoint = $ContentLibraryUpdateSessionFileService.add($ItemUpdateSessionID,$ItemUpdateSessionEndpointType)
 
 
