@@ -2,10 +2,10 @@ Function Add-ContentLibraryItem {
     <#
     .NOTES :
     --------------------------------------------------------
-    Created by : Stuart Yerdon
-    Website : https://notesofascripter.com/2018/12/18/how-add-vm-content-library-powercli/
-    Modified by: Eric B Lee
+    Creaded by: Eric B Lee
     Website : https://github.cerner.com/CTS/VirtOps
+    Some code referenced from: Stuart Yerdon
+    Code referenced Website : https://notesofascripter.com/2018/12/18/how-add-vm-content-library-powercli/
     --------------------------------------------------------
     .DESCRIPTION
     This function uploads a VM to the Content library.
@@ -14,7 +14,7 @@ Function Add-ContentLibraryItem {
     .PARAMETER LibItemName
     Name of the template after imported to library.    
     .PARAMETER ItemURL
-    Name of the template after imported to library.
+    URL to pull OVA file from
     .PARAMETER Description
     Description of the imported item.
     .EXAMPLE
@@ -28,7 +28,14 @@ Function Add-ContentLibraryItem {
     [Parameter(Mandatory=$true)][string]$Description
     )
      
-    # Make sure Library exists
+    # Make sure vCenter server is 6.7. HTTP(s) import not supported on 6.5 or older
+    If($global:DefaultVIServers.version -lt "6.7.0"){
+        Write-Host -ForegroundColor red "$(get-date -format g): $($vCenter) server version is not supported by this function. "
+        #Exit
+    }
+
+
+    # Make sure Content Library exists
     $library_ID = (Get-ContentLibrary -Name $LibraryName).ID 
     IF(!$library_ID){
         Write-Host -ForegroundColor red "$(get-date -format g): $($LibraryName) does not exist. Exiting process."
@@ -39,57 +46,95 @@ Function Add-ContentLibraryItem {
     
     
     # Check to see if item already exists 
-    $existingClItem = Get-ContentLibraryItem -ContentLibrary $LibraryName -Name $LibItemName
+    $ContentLibraryItemService = Get-CisService com.vmware.content.library.item
+    $libraryItems = $ContentLibraryItemService.list($library_ID)
+    foreach($libraryItem in $libraryItems) {
+        $item = $ContentLibraryItemService.get($libraryItem)
+        if($item.name -eq $LibItemName){
+            $CLitem_ID = $libraryItem
+            break
+            }
+    }
+   
+    # Get URL Cert Thumbprint - Import will fail if Cert chain not fully validated or root Certs not imported to vCenter
+    $CLitemWebSiteRequest = [Net.WebRequest]::Create($ItemURL)
+    Try { $CLitemWebSiteRequest.GetResponse() } catch {}
+    $CLitemWebSiteCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 ($CLitemWebSiteRequest.ServicePoint.Certificate)
+    # Converting to proper format for vCenter API
+    $CLitemWebSiteCertThumbprint = ($CLitemWebSiteCert.Thumbprint -replace '(..)','$1:') -replace ".$"
 
-
-
-    ###########   Update from here
-
-
-    # Add/update item
-    $ContentLibraryOvfService = Get-CisService com.vmware.vcenter.ovf.library_item
+    #   Unique ID for API access
     $UniqueChangeId = [guid]::NewGuid().tostring()
-    $createOvfTarget = $ContentLibraryOvfService.Help.create.target.Create()
-    $createOvfTarget.library_id = $library_ID
 
-    if(!$item_ID){
-        write-host -ForegroundColor yellow $LibItemName "doesn't exist. Creating it"
-    } else {
-        write-host -ForegroundColor yellow $LibItemName "exist. Will update library item."
-        write-host
-        # Passes ID of existing library item so it updates instead of creating new item with same name
-        $createOvfTarget.library_item_id = $item_ID
-        
-        write-host -ForegroundColor yellow "Updating Library Item -- " $LibItemName
+
+    #####   Main Process
+  
+    # Create Item if it doesn't exist.
+    If(!$CLitem_ID){
+        ##  Create CL Item
+        $ItemCreateSpec = $ContentLibraryItemService.Help.create.create_spec.Create()
+        $ItemCreateSpec.library_id = $library_ID
+        $ItemCreateSpec.name = $LibItemName
+        #$ItemCreateSpec.type = "OVF"
+        $CLitem_ID = $ContentLibraryItemService.create($UniqueChangeId,$ItemCreateSpec)
     }
-
-    $createOvfSource = $ContentLibraryOvfService.Help.create.source.Create()
-    $createOvfSource.type = ((Get-VM $VMname).ExtensionData.MoRef).Type
-    $createOvfSource.id = ((Get-VM $VMname).ExtensionData.MoRef).Value
-        
-    $createOvfCreateSpec = $ContentLibraryOvfService.help.create.create_spec.Create()
-    $createOvfCreateSpec.name = $LibItemName
-    $createOvfCreateSpec.description = $Description
-
-    $libraryTemplateId = $ContentLibraryOvfService.create($UniqueChangeId,$createOvfSource,$createOvfTarget,$createOvfCreateSpec)
     
-    # sleep 5 seconds so Content Library Item Attributes finish updating
-    Start-Sleep -Seconds 5
+    # Get current content version
+    $CLItemCurrentVersion = ($ContentLibraryItemService.get($CLitem_ID)).content_version
 
-    if($item_ID){
-        # check to see if item updated successfully. If so, update description
-        If ((get-date ($ContentLibraryService2.get($item_ID).last_modified_time)) -gt ((Get-Date).AddMinutes(-2))){
 
-        # Update description
-        $ContentLibraryItemDescUpdate = $ContentLibraryService2.Help.update.update_spec.Create()
-        $ContentLibraryItemDescUpdate.description = $Description
-        $ContentLibraryItemDescUpdate.id = $item_ID
-        $ContentLibraryItemDescUpdate.library_id = $library_ID
-        $ContentLibraryItemDescUpdateGo = $ContentLibraryService2.update($item_ID,$ContentLibraryItemDescUpdate)
-        }
-    }
+    # Create Update Session
+    $ContentLibraryUpdateSessionService = Get-CisService com.vmware.content.library.item.update_session
+    $ItemUpdateSessionInfo = $ContentLibraryUpdateSessionService.Help.create.create_spec.Create()
+    $ItemUpdateSessionInfo.library_item_id = $CLitem_ID
+    $ItemUpdateSessionID = $ContentLibraryUpdateSessionService.create($UniqueChangeId,$ItemUpdateSessionInfo)
+    start-sleep -s 2
+
+    # Upload Image Endpoint
+    $ContentLibraryUpdateSessionFileService = Get-CisService com.vmware.content.library.item.updatesession.file
+    $ItemUpdateSessionEndpointType = $ContentLibraryUpdateSessionFileService.Help.add.file_spec.Create()
+    $ItemUpdateSessionEndpointType.name = $LibItemName
+    $ItemUpdateSessionEndpointType.source_endpoint.uri = $ItemURL
+    $ItemUpdateSessionEndpointType.source_endpoint.ssl_certificate_thumbprint = $CLitemWebSiteCertThumbprint
+    $ItemUpdateSessionEndpointType.source_type = "PULL"
+    #$ItemUpdateSessionEndpointType.checksum_info.checksum = $itemChecksum
+    $ItemUpdateSessionEndpointType.size = $itemSize
+    $ItemUpdateEndpoint = $ContentLibraryUpdateSessionFileService.add($ItemUpdateSessionID,$ItemUpdateSessionEndpointType)
+
+
+    # Check status until file is fully uploaded
+    $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
+    DO{
+    start-sleep -s 10
+    $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
+    Write-Host -ForegroundColor Green "Bytes left to transfer: ($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred)"
+    } While (($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred) -gt 0)
+    Write-Host -ForegroundColor Yellow "$(get-date -format g):      Transfer Completed"
+
+
+    # If successful - Mark as "Validated" and "Completed" then updated DESCRIPTION
+    IF(($ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID))[0].status = "READY"){
+        $ContentLibraryUpdateSessionFileService.validate($ItemUpdateSessionID)
         
+        # Complete session so CL item is updated and task completed. Wait 5 seconds for the process to finish on vCenter.
+        $ContentLibraryUpdateSessionService.complete($ItemUpdateSessionID)
+        start-sleep -s 5
+
+        # Update Description once completed:
+        $ItemUpdateSpec = $ContentLibraryItemService.Help.update.update_spec.Create()
+        $ItemUpdateSpec.description = $Description
+        $ItemUpdateSpec.library_id = $CLitem_ID
+        $CLItemUpdate = $ContentLibraryItemService.update($CLitem_ID,$ItemUpdateSpec)
+        
+    } else {
+        # Cancel Update Session
+        $ContentLibraryUpdateSessionService.cancel($ItemUpdateSessionID)
     }
+
+
+    # Finalize process by deleteding update session.
+    $ContentLibraryUpdateSessionService.delete($ItemUpdateSessionID)
+        
 }
     
     
