@@ -31,7 +31,7 @@ Function Add-ContentLibraryItem {
     # Make sure vCenter server is 6.7. HTTP(s) import not supported on 6.5 or older
     If($global:DefaultVIServers.version -lt "6.7.0"){
         Write-Host -ForegroundColor red "$(get-date -format g): $($vCenter) server version is not supported by this function. "
-        #Exit
+        break
     }
 
 
@@ -39,7 +39,7 @@ Function Add-ContentLibraryItem {
     $library_ID = (Get-ContentLibrary -Name $LibraryName).ID 
     IF(!$library_ID){
         Write-Host -ForegroundColor red "$(get-date -format g): $($LibraryName) does not exist. Exiting process."
-        Exit
+        break
     } Else {
         Write-Host -ForegroundColor Green "$(get-date -format g): $($LibraryName) Is there. Let's GOOOO!!!!!"
     }
@@ -83,7 +83,7 @@ Function Add-ContentLibraryItem {
     $CLItemCurrentVersion = ($ContentLibraryItemService.get($CLitem_ID)).content_version
 
 
-    # Create Update Session
+    # Create Update Session and pause 2 sec so it opens
     $ContentLibraryUpdateSessionService = Get-CisService com.vmware.content.library.item.update_session
     $ItemUpdateSessionInfo = $ContentLibraryUpdateSessionService.Help.create.create_spec.Create()
     $ItemUpdateSessionInfo.library_item_id = $CLitem_ID
@@ -103,19 +103,20 @@ Function Add-ContentLibraryItem {
     # Check status until file is fully uploaded
     $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
     DO{
-    start-sleep -s 10
+    start-sleep -s 15
     $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
-    Write-Host -ForegroundColor Green  "Bytes left to transfer: $($($ContentLibraryUploadStatus[0].size) - $($ContentLibraryUploadStatus[0].bytes_transferred))"
+    $ClitemBytesLeftToTranser = ($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred)
+    Write-Host -ForegroundColor Green  "Bytes left to transfer: $($ClitemBytesLeftToTranser)"
     } While (($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred) -gt 0)
     Write-Host -ForegroundColor Yellow "$(get-date -format g):      Transfer Completed"
 
 
     # If file uploaded - Mark as "Validated" and "Completed" then updated DESCRIPTION
     IF(($ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID))[0].status = "READY"){
-        $ContentLibraryUpdateSessionFileService.validate($ItemUpdateSessionID)
+        $CLItemSessionValidate = $ContentLibraryUpdateSessionFileService.validate($ItemUpdateSessionID)
         
         # Complete session so CL item is updated and task completed. Wait 5 seconds for the process to finish on vCenter.
-        $ContentLibraryUpdateSessionService.complete($ItemUpdateSessionID)
+        $CLItemSessionComplete = $ContentLibraryUpdateSessionService.complete($ItemUpdateSessionID)
         start-sleep -s 5
 
         # Validate file applied to image item.
@@ -132,6 +133,6 @@ Function Add-ContentLibraryItem {
     }
 
     # Finalize process by deleteding update session.
-    $CLItemDeleteSession = $ContentLibraryUpdateSessionService.delete($ItemUpdateSessionID)
+    $CLItemSessionDelete = $ContentLibraryUpdateSessionService.delete($ItemUpdateSessionID)
         
 }
