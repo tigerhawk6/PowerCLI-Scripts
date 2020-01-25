@@ -129,10 +129,7 @@ Function Add-ContentLibraryItem {
         $ContentLibraryUpdateSessionService.cancel($ItemUpdateSessionID)
     }
 
-
     # Finalize process by deleteding update session.
     $ContentLibraryUpdateSessionService.delete($ItemUpdateSessionID)
         
 }
-    
-    
