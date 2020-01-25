@@ -105,7 +105,7 @@ Function Add-ContentLibraryItem {
     DO{
     start-sleep -s 10
     $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
-    Write-Host -ForegroundColor Green      Bytes left to transfer: ($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred)
+    Write-Host -ForegroundColor Green  "Bytes left to transfer: $($($ContentLibraryUploadStatus[0].size) - $($ContentLibraryUploadStatus[0].bytes_transferred))"
     } While (($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred) -gt 0)
     Write-Host -ForegroundColor Yellow "$(get-date -format g):      Transfer Completed"
 
@@ -132,6 +132,6 @@ Function Add-ContentLibraryItem {
     }
 
     # Finalize process by deleteding update session.
-    $ContentLibraryUpdateSessionService.delete($ItemUpdateSessionID)
+    $CLItemDeleteSession = $ContentLibraryUpdateSessionService.delete($ItemUpdateSessionID)
         
 }
