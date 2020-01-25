@@ -18,7 +18,7 @@ Function Add-ContentLibraryItem {
     .PARAMETER Description
     Description of the imported item.
     .EXAMPLE
-    Add-TemplateToLibrary -LibraryName 'LibraryName' -VMname '2016 STD Template v1.0 VM' -LibItemName '2016 STD Template' -Description 'Uploaded via API calls'
+    Add-ContentLibraryItem -LibraryName 'LibraryName' -LibItemName '2016-Core-Template' -ItemURL "https://webaddress.com/2016-Core-Template.ova" -Description 'Uploaded via API calls'
     #>
      
     param(
@@ -105,12 +105,12 @@ Function Add-ContentLibraryItem {
     DO{
     start-sleep -s 10
     $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
-    Write-Host -ForegroundColor Green "Bytes left to transfer: ($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred)"
+    Write-Host -ForegroundColor Green Bytes left to transfer: ($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred)
     } While (($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred) -gt 0)
     Write-Host -ForegroundColor Yellow "$(get-date -format g):      Transfer Completed"
 
 
-    # If successful - Mark as "Validated" and "Completed" then updated DESCRIPTION
+    # If file uploaded - Mark as "Validated" and "Completed" then updated DESCRIPTION
     IF(($ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID))[0].status = "READY"){
         $ContentLibraryUpdateSessionFileService.validate($ItemUpdateSessionID)
         
@@ -118,12 +118,14 @@ Function Add-ContentLibraryItem {
         $ContentLibraryUpdateSessionService.complete($ItemUpdateSessionID)
         start-sleep -s 5
 
-        # Update Description once completed:
-        $ItemUpdateSpec = $ContentLibraryItemService.Help.update.update_spec.Create()
-        $ItemUpdateSpec.description = $Description
-        $ItemUpdateSpec.library_id = $CLitem_ID
-        $CLItemUpdate = $ContentLibraryItemService.update($CLitem_ID,$ItemUpdateSpec)
-        
+        # Validate file applied to image item.
+        If(($ContentLibraryItemService.get($CLitem_ID)).content_version -gt $CLItemCurrentVersion){
+            # Update Description:
+            $ItemUpdateSpec = $ContentLibraryItemService.Help.update.update_spec.Create()
+            $ItemUpdateSpec.description = $Description
+            $ItemUpdateSpec.library_id = $CLitem_ID
+            $CLItemUpdate = $ContentLibraryItemService.update($CLitem_ID,$ItemUpdateSpec)
+        }
     } else {
         # Cancel Update Session
         $ContentLibraryUpdateSessionService.cancel($ItemUpdateSessionID)
