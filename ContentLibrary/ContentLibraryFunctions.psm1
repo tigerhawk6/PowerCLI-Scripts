@@ -75,7 +75,7 @@ Function Add-ContentLibraryItem {
         $ItemCreateSpec = $ContentLibraryItemService.Help.create.create_spec.Create()
         $ItemCreateSpec.library_id = $library_ID
         $ItemCreateSpec.name = $LibItemName
-        #$ItemCreateSpec.type = "OVF"
+        $ItemCreateSpec.type = "ovf"
         $CLitem_ID = $ContentLibraryItemService.create($UniqueChangeId,$ItemCreateSpec)
     }
     
@@ -103,7 +103,7 @@ Function Add-ContentLibraryItem {
     # Check status until file is fully uploaded
     $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
     DO{
-    start-sleep -s 15
+    start-sleep -s 20
     $ContentLibraryUploadStatus = $ContentLibraryUpdateSessionFileService.list($ItemUpdateSessionID)
     $ClitemBytesLeftToTranser = ($ContentLibraryUploadStatus[0].size - $ContentLibraryUploadStatus[0].bytes_transferred)
     Write-Host -ForegroundColor Green  "Bytes left to transfer: $($ClitemBytesLeftToTranser)"
